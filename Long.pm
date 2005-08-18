@@ -8,8 +8,9 @@ use Text::Wrap;
 use Getopt::Long qw(Configure);
 use QWizard;
 use QWizard::Storage::File;
+use File::Temp qw(tempfile);
 
-our $VERSION="0.2";
+our $VERSION="0.3";
 
 require Exporter;
 
@@ -19,6 +20,44 @@ our $GUI_qw;
 our $verbose;
 our @ARGVsaved;
 
+#
+# Configuration variables
+#
+my %config = (
+	      capture_output => 0,
+	      display_help => 0,
+	     );
+
+# Primary storage for QWizard
+my %primaries = 
+  (
+   display_results =>
+   {
+    title => "$ARGV Output",
+    questions =>
+    [
+     { type => 'paragraph',
+       values => sub {
+	   my $data;
+	   # XXX: arg.  optimize with read() and then a file display widget
+	   open(I,$config{'output_file'});
+	   while (<I>) {
+	       $data .= $_;
+	   }
+	   close(I);
+	   return $data;
+       }
+     }
+    ]
+   }
+  );
+
+
+
+
+#
+# changes the default for a given question to a memorized value
+#
 sub set_default_opt {
     my ($cache, @qs) = @_;
     if ($cache) {
@@ -47,6 +86,8 @@ sub GetOptions(@) {
 
     # If the user didn't specify any arguments, we display a GUI for them.
     if ($#main::ARGV == -1) {
+
+	$config{'GUI_on'} = 1;
 	
 	# they called us with no options, offer them a GUI screen full
 	my @names;
@@ -224,7 +265,7 @@ sub GetOptions(@) {
 	    default => 1,
 	    values => 'Save and continue'};
 
-	# construct the QWizard GUI primaries from the above information
+	# build primaries based on everything passed to us.
 	my $pris;
 
 	# include other primary information passed to us
@@ -283,12 +324,15 @@ sub GetOptions(@) {
 
 	# Finally, construct the QWizard GUI class...
 	my $qw = new QWizard(primaries => $pris,
-			  no_confirm => 1,
-			  title => $main::0);
+			     no_confirm => 1,
+			     title => $main::0);
 
 
 	# ... remember it ...
 	$GUI_qw = $qw;
+
+	# ... load in our other primaries ...
+	$qw->merge_primaries(\%primaries);
 
 	# ... and tell it to go
 	$qw->magic('getopts', @{$GUI_info{'submodules'}});
@@ -328,9 +372,18 @@ sub GetOptions(@) {
     # finally, pass on to the original Getopt::Long routine.
     my $ret = Getopt::Long::GetOptions(@opts);
 
+    # capture stderr/out if required to display later.
+    if ($config{'capture_output'} && $config{'GUI_on'}) {
+	($config{'fh'}, $config{'output_file'}) =
+	  tempfile("guilongXXXXXX", SUFFIX => 'txt');
+	close(STDOUT);
+	close(STDERR);
+	*STDOUT = $config{'fh'};
+	*STDERR = $config{'fh'};
+    }
 
     # Print help message if auto_help is on (XXX)
-    if (defined($Getopt::Long::auto_help) && $Getopt::Long::auto_help &&
+    if (defined($config{'display_help'}) &&
 	ref($_[0]) eq 'HASH' && ($_[0]{'help'} || $_[0]{'h'})) {
 	# print usage information
 	print STDERR "Usage for: $0\n";
@@ -396,6 +449,7 @@ sub GetOptions(@) {
 	}
 	exit(1);
     }
+
     return $ret;
 }
 
@@ -413,6 +467,48 @@ sub MapToGetoptLong {
     return @opts;
 }
 
+#
+# Configure's the running operation of the module.  Any unknown
+# arguments are passed to the parent Configure script.
+#
+sub Configure (@) {
+    my @options = @_;
+    my @passopts;
+    foreach my $opt (@options) {
+	if (exists($config{$opt})) {
+	    $config{$opt} = 1;
+	} else {
+	    push @passopts, $opt;
+	}
+    }
+    Getopt::Long::Configure(@passopts);
+}
+
+#
+# Calls qwizard at the end if output capture was turned on.
+#
+sub END {
+    if ($config{'capture_output'} && $config{'GUI_on'}) {
+	$config{'fh'}->close();
+	$GUI_qw->magic('display_results');
+    }
+#     if ($config{'display_image'} && $config{'GUI_on'} && $config{'imgfile'}) {
+# 	if ($mapinwindow && $Getopt::Long::GUI::GUI_qw) {
+# 	    $GUI_qw->merge_primaries(
+# 				     {
+# 				      imgout =>
+# 				      {
+# 				       questions =>
+# 				       [{
+# 					 type => 'image',
+# 					 image => $config{'imgfile'}
+# 					}]
+# 				      }});
+# 	    $GUI_qw->magic('mapout');
+# 	}
+#     }
+}
+
 1;
 
 =pod
@@ -425,8 +521,8 @@ Getopt::GUI::Long
 
   use Getopt::GUI::Long;
 
-  # pass useful config options to Getopt::Long
-  Getopt::Long::Configure(qw(auto_help no_ignore_case));
+  # pass useful config options to Configure
+  Getopt::GUI::Long::Configure(qw(display_help no_ignore_case capture_output));
   GetOptions(\%opts,
 	     ["h|help", "Show help for command line options"],
 	     ["some-flag=s", "perform some flag based on a value"]);
@@ -610,15 +706,32 @@ Defines subroutine(s) to be called after the GUI has completely finished.
 
 =back
 
-=head1 AUTO HELP
+=head1 CONFIGURATION
 
-If you call Getopt::Long's configure routine as follows:
+If you call Getopt::GUI::Long's Configure routine, it will accept a
+number of configure tokens and will pass the remaining ones to the
+Getopt::Long Configure routine.  The tokens that it recognizes itself
+are described below:
 
-	Getopt::Long::Configure(qw(auto_help));
+=over
+
+=item display_help
 
 The Getopt::GUI::Long package will auto-display help messages based on
 the text included in the GetOptions call.  No more writing those silly
 usage() functions!
+
+Note that this differs from the Getopt::Long's implementation of the
+auto_help token in that the information is pulled from the extended
+GetOptions called instead of the pod documentation.
+
+=item capture_output
+
+This tells the Getopt::GUI::Long module that it should caputure the
+resulting STDOUT and STDERR results from the script and display the
+results in a window once the script has finished.
+
+=back
 
 =head1 PORTABILITY
 
@@ -635,7 +748,7 @@ LocalOptionsMap functions should be copied to your perl script.
       if (eval {require Getopt::GUI::Long;}) {
   	import Getopt::GUI::Long;
         # optional configure call
-	Getopt::Long::Configure(qw(auto_help no_ignore_case));
+	Getopt::Long::Configure(qw(display_help no_ignore_case capture_output));
   	return GetOptions(@_);
       }
       require Getopt::Long;
