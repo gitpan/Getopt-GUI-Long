@@ -10,7 +10,7 @@ use QWizard;
 use QWizard::Storage::File;
 use File::Temp qw(tempfile);
 
-our $VERSION="0.3";
+our $VERSION="0.4";
 
 require Exporter;
 
@@ -770,6 +770,16 @@ LocalOptionsMap functions should be copied to your perl script.
       }
       return @opts;
   }
+
+=head1 AUTHOR
+
+Wes Hardaker, hardaker@users.sourceforge.net
+
+=head1 SEE ALSO
+
+perl(1)
+
+modules: QWizard
 
 =cut
 
