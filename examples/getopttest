@@ -9,7 +9,7 @@ my %opts =
 Getopt::GUI::Long::Configure(qw(display_help no_ignore_case capture_output));
 GetOptions(\%opts,
 	   ['GUI:screen','Main Screen Title',
-	    introducton => 'This is a test application that tests various aspects of how a Getopt::GUI::Long module behaves and serves as a good example of how you con do various things.'],
+	    introduction => 'This is a test application that tests various aspects of how a Getopt::GUI::Long module behaves and serves as a good example of how you con do various things.'],
 
 	   ['GUI:separator', 'This is a separator describing these options:'],
 	   ["f|some-flag=s",   "my flag value"],

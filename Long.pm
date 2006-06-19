@@ -1,6 +1,6 @@
 package Getopt::GUI::Long;
 
-# Copyright 2005, Sparta, Inc.
+# Copyright 2005-2006, Sparta, Inc.
 # All rights reserved.
 
 use strict;
@@ -8,9 +8,10 @@ use Text::Wrap;
 use Getopt::Long qw();
 use QWizard;
 use QWizard::Storage::File;
+use QWizard::Plugins::Bookmarks qw(init_bookmarks);
 use File::Temp qw(tempfile);
 
-our $VERSION="0.5";
+our $VERSION="0.6";
 
 require Exporter;
 
@@ -53,8 +54,6 @@ my %primaries =
   );
 
 
-
-
 #
 # changes the default for a given question to a memorized value
 #
@@ -78,9 +77,11 @@ sub GetOptions(@) {
     my $progname = $main::0;
     my $cache;
     my %GUI_info;
+    my %addpris;
 
     $progname =~ s/([^a-zA-Z0-9])/'_' . ord($1)/eg;
     my $cachefile = "$ENV{HOME}/.GetoptLongGUI/$progname";
+    my $marksfile = "$ENV{HOME}/.GetoptLongGUI/$progname-bookmarks";
     if (-f $cachefile) {
 	$cache = new QWizard::Storage::File (file => $cachefile);
 	$cache->load_data();
@@ -101,8 +102,7 @@ sub GetOptions(@) {
 	
 	# Define the first screen
 	$pris->{'screen' . $screencount} =
-	  { title => "Options for $main::0",
-	  };
+	  { title => "Options for $main::0", };
 
 	for (my $i = $st; $i <= $#opts; $i += $cb) {
 	    my ($spec, $desc, %rest);
@@ -305,17 +305,9 @@ sub GetOptions(@) {
 	    }
 	}
 
-	# offer a save options button
-	push @qs, "", 
-	  { type => 'button',
-	    name => 'savethese',
-	    text => 'Remember these values:',
-	    default => 1,
-	    values => 'Save and continue'};
-
 	# include other primary information passed to us
 	if (exists($GUI_info{'otherprimaries'})) {
-	    %$pris = @{$GUI_info{'otherprimaries'}};
+	    %addpris = @{$GUI_info{'otherprimaries'}};
 	}
 
 	# Prompt for remaining arguments (or don't if requested to
@@ -323,7 +315,7 @@ sub GetOptions(@) {
 	# realm of the Getopt processing like file-names, etc.
 	if ($GUI_info{'nootherargs'}) {
 	    push @{$pris->{'screen0'}{'questions'}},
-	      "", { type => 'hidden', name => '__otherargs' };
+	      { type => 'hidden', name => '__otherargs' };
 	} else {
 	    my $q = { type => 'text',
 		      width => 80,
@@ -341,25 +333,6 @@ sub GetOptions(@) {
 
 	# our last primary setup
 	$pris->{'screen' . $screencount}{'questions'} = [@qs];
-	push @{$pris->{'screen' . $screencount}{'post_answers'}},
-	  [sub {
-	       my ($wiz, $cache, $cachefile) = @_;
-		
-	       #
-	       # if they requested the values be
-	       # saved as defaults store them to a file.
-	       #
-	       if (qwparam('savethese')) {
-		   if (! -d "$ENV{HOME}/.GetoptLongGUI") {
-		       mkdir("$ENV{HOME}/.GetoptLongGUI");
-		   }
-		   if (!$cache) {
-		       $cache = new QWizard::Storage::File (file => $cachefile);
-		   }
-		   $cache->copy_from($wiz->{'generator'}{'datastore'});
-	       }
-	   }, $cache, $cachefile];
-
 	push @{$pris->{'screen' . $screencount}{'actions'}},
 	  [sub {
 	       #
@@ -415,12 +388,19 @@ sub GetOptions(@) {
 			     no_confirm => 1,
 			     title => $main::0);
 
+	# add the bookmarks menu
+	if (ref($qw->{'generator'}) !~ /HTML/ && !$GUI_info{'nosavebutton'}) {
+	    my $marks = new QWizard::Storage::File (file => $marksfile);
+	    $marks->load_data();
+	    init_bookmarks($qw, $marks, title => 'Save Settings');
+	}
 
 	# ... remember it ...
 	$GUI_qw = $qw;
 
 	# ... load in our other primaries ...
 	$qw->merge_primaries(\%primaries);
+	$qw->merge_primaries(\%addpris);
 
 	# ... and tell it to go
 	$qw->magic('screen0', @{$GUI_info{'submodules'}});
@@ -446,7 +426,7 @@ sub GetOptions(@) {
 
     # map the options passed to us to ones that are compliant with
     # Getopt::Long
-    @opts = MapToGetoptLong(@_);
+    @opts = MapToGetoptLong(\%GUI_info, @_);
 
     # save the arguments we contstructed for future use.
     @ARGVsaved = @main::ARGV;
@@ -470,10 +450,17 @@ sub GetOptions(@) {
 	*STDERR = $config{'fh'};
     }
 
-    if (defined($config{'display_help'}) &&
+    if (defined($config{'display_help'}) && $config{'display_help'} &&
 	ref($_[0]) eq 'HASH' &&
 	($_[0]{'help'} || $_[0]{'help-full'} || $_[0]{'h'})) {
 	display_help($st, $cb, \%GUI_info, \@savedopts, @_);
+    }
+
+    if (defined($config{'display_help'}) && $config{'display_help'} &&
+	defined($GUI_info{'VERSION'}) &&
+	ref($_[0]) eq 'HASH' && ($_[0]{'version'})) {
+	print STDERR "Version: ",$GUI_info{'VERSION'},"\n";
+	exit(0);
     }
     return $ret;
 }
@@ -588,6 +575,9 @@ sub display_help {
 			       'Display help options -- long flags preferred');
     _display_help_option_long('help-full','',
 			       'Display all help options -- short and long');
+    _display_help_option_long('version','',
+			      'Display the version number')
+      if ($GUI_info->{'VERSION'});
 
     exit(1);
 }
@@ -613,11 +603,15 @@ sub _display_help_option_long {
 }
 
 sub MapToGetoptLong {
+    my $guiinfo = shift;
     my ($st, $cb, @opts) = ((ref($_[0]) eq 'HASH') 
 			    ? (1, 1, $_[0]) : (0, 2));
     for (my $i = $st; $i <= $#_; $i += $cb) {
 	if ($_[$i]) {
-	    next if (ref($_[$i]) eq 'ARRAY' && $_[$i][0] =~ /^GUI:/);
+	    if (ref($_[$i]) eq 'ARRAY' && $_[$i][0] =~ /^GUI:(.*)/) {
+		$guiinfo->{$1} = $_[$i][1];
+		next;
+	    }
 	    push @opts, ((ref($_[$i]) eq 'ARRAY') ? $_[$i][0] : $_[$i]);
 	    push @opts, $_[$i+1] if ($cb == 2);
 	}
@@ -627,7 +621,7 @@ sub MapToGetoptLong {
 }
 
 sub GetHelpOptions {
-    return ('help','h','help-full');
+    return ('help','h','help-full','version');
 }
 
 #
@@ -654,22 +648,8 @@ sub END {
     if ($config{'capture_output'} && $config{'GUI_on'}) {
 	$config{'fh'}->close();
 	$GUI_qw->magic('display_results');
+	unlink($config{'output_file'});
     }
-#     if ($config{'display_image'} && $config{'GUI_on'} && $config{'imgfile'}) {
-# 	if ($mapinwindow && $Getopt::Long::GUI::GUI_qw) {
-# 	    $GUI_qw->merge_primaries(
-# 				     {
-# 				      imgout =>
-# 				      {
-# 				       questions =>
-# 				       [{
-# 					 type => 'image',
-# 					 image => $config{'imgfile'}
-# 					}]
-# 				      }});
-# 	    $GUI_qw->magic('mapout');
-# 	}
-#     }
 }
 
 1;
@@ -944,6 +924,14 @@ specify this so the other arguments field is not shown.  You're
 expected, in your self-handling code, to set the __otherargs QWizard
 parameter to the final arguments that should be passed on.
 
+=item GUI:nosavebutton
+
+  EG:  ['GUI:nosavebutton', 1]
+
+Normally the GUI screen offers a "save" menu that lets users save
+their current screen settings for future calls.  Using this setting
+turns off this behavior so the button isn't shown.
+
 =item GUI:otherprimaries
 
   EG:  ['GUI:otherprimaries', primaryname => 
@@ -960,23 +948,41 @@ initial one.
 
 =item GUI:post_answers
 
-  EG:  ['GUI:post_actions', sub { do_something(); }]
+  EG:  ['GUI:post_answers', sub { do_something(); }]
 
 Defines an option for QWizard post_answers subroutines to run.
 
 =item GUI:actions
 
-  EG:  ['GUI:post_actions', sub { do_something(); }]
+  EG:  ['GUI:actions', sub { do_something(); }]
 
 Defines an option for QWizard actions subroutines to run.
 
-=item GUI:actions
+=item GUI:hook_finished
 
   EG:  ['GUI:hook_finished', sub { do_something(); }]
 
 Defines subroutine(s) to be called after the GUI has completely finished.
 
-=item GUI:
+=item GUI:VERSION
+
+If display_help is defined, and the above token is specified
+Getopt::GUI::Long takes over the output for --version output as well.
+
+  EG:  ['GUI:VERSION','0.9']
+
+Produces the --version help option:
+
+  Help Options:
+     -h                    Display help options -- short flags preferred
+    --help                 Display help options -- long flags preferred
+    --help-full            Display all help options -- short and long
+    --version              Display the version number
+
+And also auto-handles the --version switch:
+
+  % PROGRAM --version
+  Version: 0.9
 
 =back
 
