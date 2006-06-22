@@ -11,7 +11,7 @@ use QWizard::Storage::File;
 use QWizard::Plugins::Bookmarks qw(init_bookmarks);
 use File::Temp qw(tempfile);
 
-our $VERSION="0.61";
+our $VERSION="0.62";
 
 require Exporter;
 
@@ -645,7 +645,7 @@ sub Configure (@) {
 # Calls qwizard at the end if output capture was turned on.
 #
 sub END {
-    if ($config{'capture_output'} && $config{'GUI_on'}) {
+    if ($config{'capture_output'} && $config{'GUI_on'} && $config{'fh'}) {
 	$config{'fh'}->close();
 	$GUI_qw->magic('display_results');
 	unlink($config{'output_file'});
