@@ -11,7 +11,7 @@ use QWizard::Storage::File;
 use QWizard::Plugins::Bookmarks qw(init_bookmarks);
 use File::Temp qw(tempfile);
 
-our $VERSION="0.6";
+our $VERSION="0.61";
 
 require Exporter;
 
