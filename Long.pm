@@ -11,7 +11,7 @@ use QWizard::Storage::File;
 use QWizard::Plugins::Bookmarks qw(init_bookmarks);
 use File::Temp qw(tempfile);
 
-our $VERSION="0.62";
+our $VERSION="0.7";
 
 require Exporter;
 
@@ -48,7 +48,10 @@ my %primaries =
 	   close(I);
 	   return $data;
        }
-     }
+     },
+     { type => 'hidden',
+       name => 'QWizard_finish',
+       values => '_Exit' }
     ]
    }
   );
@@ -378,6 +381,14 @@ sub GetOptions(@) {
 	      @{$GUI_info{'post_answers'}};
 	}
 
+	push @{$pris->{'screen' . $screencount}{'questions'}},
+	  { type => 'hidden', name => 'QWizard_finish', values => '' };
+	push @{$pris->{'screen' . $screencount}{'post_answers'}},
+	  [sub {
+	       my ($wiz, $screencount) = @_;
+	       qwparam('QWizard_finish', $GUI_info{'run_button'} || '_Run');
+	   }];
+
 	# add in an actions clauses to the master primary
 	if ($GUI_info{'actions'}) {
 	    unshift @{$pris->{'screen0'}{'actions'}}, @{$GUI_info{'actions'}};
@@ -404,7 +415,7 @@ sub GetOptions(@) {
 
 	# ... and tell it to go
 	$qw->magic('screen0', @{$GUI_info{'submodules'}});
-
+	$qw->finished(); # drop the window for long running apps
 
 	# ... if we aren't finished processing then exit.  This should
 	# only happen if we're in a CGI script where we're not done yet.
@@ -649,6 +660,7 @@ sub END {
 	$config{'fh'}->close();
 	$GUI_qw->magic('display_results');
 	unlink($config{'output_file'});
+	$GUI_qw->finished();
     }
 }
 
@@ -964,6 +976,13 @@ Defines an option for QWizard actions subroutines to run.
 
 Defines subroutine(s) to be called after the GUI has completely finished.
 
+=item GUI:run_button
+
+  EG: ['GUI:run_button', 'My Run Button']
+
+Defines the text to use for the final "Run" button (which normally
+just says "Run").
+
 =item GUI:VERSION
 
 If display_help is defined, and the above token is specified
@@ -1034,6 +1053,19 @@ resulting STDOUT and STDERR results from the script and display the
 results in a window once the script has finished.
 
 =back
+
+=head1 Using the QWizard object for other purposes
+
+The Getopt::GUI::Long qwizard object is stored at
+$Getopt::GUI::Long::GUI_qw, which is usable for other GUI screens you
+may need to create after the options screens have been processed.  You
+can also use it during the script to optionally display a progress
+meter by making use of the QWizard::set_progress function.  However,
+you should test to see if the GUI screen mode was actually used before
+operating with the object though.  As an example:
+
+  $Getopt::GUI::Long::GUI_qw->set_progress(3/5)
+    if ($Getopt::GUI::Long::GUI_qw);
 
 =head1 PORTABILITY
 

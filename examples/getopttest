@@ -50,3 +50,13 @@ print "Output flags:\n";
 foreach my $key (keys(%opts)) {
     printf "%-20s => %s\n", $key, $opts{$key};
 }
+
+print "sleepping for 5 to test screen closure...\n";
+$Getopt::GUI::Long::GUI_qw->set_progress(0) if ($Getopt::GUI::Long::GUI_qw);
+for (my $i = 0; $i < 5; $i++) {
+    sleep 1;
+    $Getopt::GUI::Long::GUI_qw->set_progress(($i+1)/5) if ($Getopt::GUI::Long::GUI_qw);
+}
+print "done";
+
+
