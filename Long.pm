@@ -6,12 +6,9 @@ package Getopt::GUI::Long;
 use strict;
 use Text::Wrap;
 use Getopt::Long qw();
-use QWizard;
-use QWizard::Storage::File;
-use QWizard::Plugins::Bookmarks qw(init_bookmarks);
 use File::Temp qw(tempfile);
 
-our $VERSION="0.7";
+our $VERSION="0.8";
 
 require Exporter;
 
@@ -28,6 +25,10 @@ my %config = (
 	      capture_output => 0,
 	      display_help => 0,
 	     );
+
+my @pass_to_qwizard_qs = qw(helpdesc helptext values labels default
+			    check_value doif submit refresh_on_change
+			    handle_results text name type indent);
 
 # Primary storage for QWizard
 my %primaries = 
@@ -77,21 +78,31 @@ sub GetOptions(@) {
 			    (1, 1, @_) : (0, 2, @_));
     my @savedopts = @_;
 
-    my $progname = $main::0;
-    my $cache;
     my %GUI_info;
-    my %addpris;
-
-    $progname =~ s/([^a-zA-Z0-9])/'_' . ord($1)/eg;
-    my $cachefile = "$ENV{HOME}/.GetoptLongGUI/$progname";
-    my $marksfile = "$ENV{HOME}/.GetoptLongGUI/$progname-bookmarks";
-    if (-f $cachefile) {
-	$cache = new QWizard::Storage::File (file => $cachefile);
-	$cache->load_data();
-    }
+    my $dohelp;
 
     # If the user didn't specify any arguments, we display a GUI for them.
-    if ($#main::ARGV == -1) {
+    if ($#main::ARGV == -1 && eval "require QWizard") {
+
+	require QWizard;
+	import QWizard;
+	require QWizard::Storage::File;
+	import QWizard::Storage::File;
+	require QWizard::Plugins::Bookmarks;
+	import QWizard::Plugins::Bookmarks qw(init_bookmarks);
+
+	# load the cache of saved default values
+	my $progname = $main::0;
+	my $cache;
+	my %addpris;
+
+	$progname =~ s/([^a-zA-Z0-9])/'_' . ord($1)/eg;
+	my $cachefile = "$ENV{HOME}/.GetoptLongGUI/$progname";
+	my $marksfile = "$ENV{HOME}/.GetoptLongGUI/$progname-bookmarks";
+	if (-f $cachefile) {
+	    $cache = new QWizard::Storage::File (file => $cachefile);
+	    $cache->load_data();
+	}
 
 	$config{'GUI_on'} = 1;
 	
@@ -306,6 +317,11 @@ sub GetOptions(@) {
 	    if ($rest{'required'} && !exists($qs[$#qs]{'check_answer'})) {
 		$qs[$#qs]{'check_value'} = \&qw_required_field;
 	    }
+
+	    # check the other auto-passing arguments
+	    foreach my $k (@pass_to_qwizard_qs) {
+		$qs[$#qs]{$k} = $rest{$k} if (exists($rest{$k}));
+	    }
 	}
 
 	# include other primary information passed to us
@@ -419,13 +435,7 @@ sub GetOptions(@) {
 
 	# ... if we aren't finished processing then exit.  This should
 	# only happen if we're in a CGI script where we're not done yet.
-	if (($qw->{'state'} != $QWizard::states{'ACTING'} &&
-	     $qw->{'state'} != $QWizard::states{'FINISHED'}) ||
-	    $qw->{'state'} == $QWizard::states{'CANCELED'}) {
-	    # we're not done or have been cancelled!  exit!
-	    exit;
-	}
-
+	exit if (!$qw->is_done());
 	
 	# if there are any final hook routines to call, do so.
 	if ($GUI_info{'hook_finished'}) {
@@ -433,6 +443,10 @@ sub GetOptions(@) {
 		$h->();
 	    }
 	}
+    } elsif ($#main::ARGV == -1) {
+	# no qwizard, but no args so force usage
+	$dohelp = 1;
+	$opts[0]{'h'} = 1;
     }
 
     # map the options passed to us to ones that are compliant with
@@ -449,7 +463,12 @@ sub GetOptions(@) {
     }
 
     # finally, pass on to the original Getopt::Long routine.
-    my $ret = Getopt::Long::GetOptions(@opts);
+    my $ret = 1;
+    $ret = Getopt::Long::GetOptions(@opts) if (!$dohelp);
+
+    if ($verbose) {
+	print STDERR "ret from long: $ret\n";
+    }
 
     # capture stderr/out if required to display later.
     if ($config{'capture_output'} && $config{'GUI_on'}) {
@@ -462,9 +481,14 @@ sub GetOptions(@) {
     }
 
     if (defined($config{'display_help'}) && $config{'display_help'} &&
-	ref($_[0]) eq 'HASH' &&
-	($_[0]{'help'} || $_[0]{'help-full'} || $_[0]{'h'})) {
+	(ref($_[0]) eq 'HASH' &&
+	 ($_[0]{'help'} || $_[0]{'help-full'} || $_[0]{'h'})) ||
+	$dohelp) {
 	display_help($st, $cb, \%GUI_info, \@savedopts, @_);
+    }
+
+    if (ref($_[0]) eq 'HASH' && exists($_[0]{'getopt-to-pod'})) {
+	_getopt_to_pod($st, $cb, \%GUI_info, \@savedopts, @_);
     }
 
     if (defined($config{'display_help'}) && $config{'display_help'} &&
@@ -486,10 +510,13 @@ sub display_help {
     my $savedopts = shift;
     # Print help message if auto_help is on (XXX)
 
+    my $topod = $GUI_info->{'__pod_to_text'};
+
     print STDERR "Usage: $0 [OPTIONS] ",
       ($GUI_info->{'otherargs_text'} ||
        ($GUI_info->{'nootherargs'} ? "" : "Other Arguments")),
-	 "\n\nOPTIONS:\n";
+	 "\n\nOPTIONS:\n"
+	   if (!$topod);
 
     for (my $i = $st; $i <= $#{$savedopts}; $i += $cb) {
 	my ($spec, $desc, %rest);
@@ -506,7 +533,11 @@ sub display_help {
 
 	# print separators
 	if ($spec =~ /^GUI:(separator|screen)/) {
-	    print STDERR "\n$desc\n";
+	    if ($topod) {
+		print STDERR "=head2 $desc\n\n";
+	    } else {
+		print STDERR "\n$desc\n";
+	    }
 	    next;
 	}
 
@@ -552,11 +583,11 @@ sub display_help {
 	}
 
 	my @args=split(/\|/,$pat);
-	if ($_[0]{'help-full'}) {
+	if ($_[0]{'help-full'} || $topod) {
 	    # they want *everything*
 	    for (my $argc=0;  $argc <= $#args; $argc++) {
 		_display_help_option($args[$argc], $argspec,
-				     ($argc == $#args)?$desc:"");
+				     ($argc == $#args)?$desc:"", $topod);
 	    }
 
 	} elsif ($_[0]{'h'}) {
@@ -593,9 +624,20 @@ sub display_help {
     exit(1);
 }
 
+sub _getopt_to_pod {
+    my $st = shift;
+    my $cb = shift;
+    my $GUI_info = shift;
+    my $savedopts = shift;
+    $GUI_info->{'__pod_to_text'} = 1;
+    display_help($st, $cb, $GUI_info, $savedopts, @_);
+}
+
 sub _display_help_option {
-    my ($arg,$spec,$desc) = @_;
-    if (length($arg) == 1) {
+    my ($arg,$spec,$desc,$topod) = @_;
+    if ($topod) {
+	_display_help_option_pod(@_);
+    } elsif (length($arg) == 1) {
 	_display_help_option_short(@_);
     } else {
 	_display_help_option_long(@_);
@@ -613,6 +655,15 @@ sub _display_help_option_long {
 		   $arg . ($spec ? "=" : "") . $spec, $desc);
 }
 
+sub _display_help_option_pod {
+    my ($arg,$spec,$desc) = @_;
+    printf STDERR ("=item  -%s%s\n\n%s\n\n",
+		   ((length($arg) == 1) ? $arg : "-" . $arg),
+		   ($spec ? ((length($arg) == 1) ? " " : "=") : "") . $spec,
+		   $desc);
+}
+
+
 sub MapToGetoptLong {
     my $guiinfo = shift;
     my ($st, $cb, @opts) = ((ref($_[0]) eq 'HASH') 
@@ -628,11 +679,16 @@ sub MapToGetoptLong {
 	}
     }
     push @opts,GetHelpOptions() if ($config{'display_help'});
+    push @opts,GetInternalOptions() unless ($config{'no_internal_options'});
     return @opts;
 }
 
 sub GetHelpOptions {
     return ('help','h','help-full','version');
+}
+
+sub GetInternalOptions {
+    return ('getopt-to-pod');
 }
 
 #
@@ -838,6 +894,45 @@ in the blank field:
 
 Note you can specify multiple question widgets if needed as well,
 though this will probably be rare in usage.
+
+=item QWizard question tokens
+
+Any of the following items can be passed as well, which will be added
+to the QWizard question structure.  See the QWizard documantion on
+"QUESTION DEFINITIONS" for details on the usage of these.
+
+=over
+
+=item type
+
+=item helpdesc
+
+=item helptext
+
+=item default
+
+=item check_value
+
+=item doif
+
+=item submit
+
+=item refresh_on_change
+
+=item handle_results
+
+=item text
+
+(Warning: Replaces the text already extracted from the prompt text
+described above).
+
+=item name
+
+(Warning: Replaces the option name extracted from the position 0
+standard flag specification string above.  Do not use this unless you
+really know what you're doing.)
+
+=back
 
 =back
 
@@ -1113,6 +1208,15 @@ script that uses a lot of these features.
 =head1 AUTHOR
 
 Wes Hardaker, hardaker@users.sourceforge.net
+
+=head1 COPYRIGHT and LICENSE
+
+Copyright (c) 2006-2007, SPARTA, Inc.  All rights reserved
+
+Copyright (c) 2006-2007, Wes Hardaker. All rights reserved
+
+Getopt::GUI::Long is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
 
 =head1 SEE ALSO
 

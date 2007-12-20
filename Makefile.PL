@@ -5,7 +5,6 @@ use ExtUtils::MakeMaker;
 %opts = (
 	      'NAME'		=> 'Getopt::GUI::Long',
 	      'VERSION_FROM'	=> 'Long.pm', # finds $VERSION
-	      'PREREQ_PM'       => { QWizard => '3.04' },
 	);
 
 WriteMakefile(%opts);
