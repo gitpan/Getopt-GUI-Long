@@ -8,7 +8,7 @@ use Text::Wrap;
 use Getopt::Long qw();
 use File::Temp qw(tempfile);
 
-our $VERSION="0.8";
+our $VERSION="0.9";
 
 require Exporter;
 
@@ -24,6 +24,7 @@ our @ARGVsaved;
 my %config = (
 	      capture_output => 0,
 	      display_help => 0,
+	      no_gui => 0,
 	     );
 
 my @pass_to_qwizard_qs = qw(helpdesc helptext values labels default
@@ -81,8 +82,20 @@ sub GetOptions(@) {
     my %GUI_info;
     my $dohelp;
 
+    my $firstarg = "";
+
+    if ($main::ARGV[0] =~ /--*gui/ || $main::ARGV[0] =~ /--*no-gui/ ||
+	$main::ARGV[0] =~ /--*nogui/) {
+	$firstarg = shift @main::ARGV;
+	$firstarg = '-' . $firstarg if ($firstarg =~ /^-[^-]/);
+    }
+
     # If the user didn't specify any arguments, we display a GUI for them.
-    if ($#main::ARGV == -1 && eval "require QWizard") {
+    if ($firstarg ne '--nogui' &&
+	$firstarg ne '--no-gui' &&
+	(($#main::ARGV == -1 && !$config{'no_gui'}) ||
+	 $firstarg eq '--gui') &&
+	eval "require QWizard") {
 
 	require QWizard;
 	import QWizard;
@@ -106,6 +119,10 @@ sub GetOptions(@) {
 
 	$config{'GUI_on'} = 1;
 	
+	# create the qwizard instance
+	my $qw = new QWizard(no_confirm => 1,
+			     title => $main::0);
+
 	# they called us with no options, offer them a GUI screen full
 	my @names;
 	my %names;
@@ -130,6 +147,8 @@ sub GetOptions(@) {
 	    } else {
 		$spec = $opts[$i];
 	    }
+
+	    next if ($rest{'nocgi'} && ref($qw->{'generator'}) =~ /HTML/);
 
 	    if ($spec =~ /^GUI:(.*)/) {
 		my $guiname = $1;
@@ -330,12 +349,14 @@ sub GetOptions(@) {
 	}
 
 	# Prompt for remaining arguments (or don't if requested to
-	# skip it).  Normally this would be stuff handled beyond the
-	# realm of the Getopt processing like file-names, etc.
+	# skip it or don't for CGIs by default).  Normally this would
+	# be stuff handled beyond the realm of the Getopt processing
+	# like file-names, etc.
 	if ($GUI_info{'nootherargs'}) {
 	    push @{$pris->{'screen0'}{'questions'}},
 	      { type => 'hidden', name => '__otherargs' };
-	} else {
+	} elsif (ref($qw->{'generator'}) !~ /HTML/ ||
+		 $GUI_info{'allowcgiargs'}) {
 	    my $q = { type => 'text',
 		      width => 80,
 		      name => '__otherargs',
@@ -348,7 +369,7 @@ sub GetOptions(@) {
 		$q->{'check_value'} = \&qw_required_field;
 	    }
 	    push @{$pris->{'screen0'}{'questions'}}, "", $q;
-	  }
+	}
 
 	# our last primary setup
 	$pris->{'screen' . $screencount}{'questions'} = [@qs];
@@ -374,8 +395,12 @@ sub GetOptions(@) {
 		       }
 		   }
 	       }
-	       push @main::ARGV,
-		 split(/\s+/,qwparam('__otherargs'));
+	       if (ref($qw->{'generator'}) !~ /HTML/ ||
+		   $GUI_info{'allowcgiargs'}) {
+		   push @main::ARGV,
+		     split(/\s+/,qwparam('__otherargs'));
+	       }
+
 	       return 'OK';
 	   }, \@names, \%names];
 
@@ -411,9 +436,7 @@ sub GetOptions(@) {
 	}
 
 	# Finally, construct the QWizard GUI class...
-	my $qw = new QWizard(primaries => $pris,
-			     no_confirm => 1,
-			     title => $main::0);
+	$qw->merge_primaries($pris);
 
 	# add the bookmarks menu
 	if (ref($qw->{'generator'}) !~ /HTML/ && !$GUI_info{'nosavebutton'}) {
@@ -617,6 +640,10 @@ sub display_help {
 			       'Display help options -- long flags preferred');
     _display_help_option_long('help-full','',
 			       'Display all help options -- short and long');
+    _display_help_option_long('gui','',
+			       'Display a help GUI');
+    _display_help_option_long('no-gui','',
+			       'Do not display the default help GUI');
     _display_help_option_long('version','',
 			      'Display the version number')
       if ($GUI_info->{'VERSION'});
@@ -688,7 +715,7 @@ sub GetHelpOptions {
 }
 
 sub GetInternalOptions {
-    return ('getopt-to-pod');
+    return ('getopt-to-pod', 'gui', 'no-gui|nogui');
 }
 
 #
@@ -808,14 +835,10 @@ Getopt::GUI::Long
   providing automatic good-looking usage output without the
   programmer needing to write usage() functions.
 
-=head1 HISTORY
-
-This module was originally named Getopt::Long::GUI but the
-Getopt::Long author wanted to reserve the Getopt::Long namespace
-entirely for himself and thus it's been recently renamed to
-Getopt::GUI::Long instead.  The class tree isn't as clean this way, as
-this module still inherits from Getopt::Long but it everything still
-works of course.
+  This also can turn normal command line programs into web CGI scripts
+  as well (automatically).  If the Getopt::GUI::Long program is
+  installed as a CGI script then it will automatically prompt the user
+  for the same variables.
 
 =head1 USAGE
 
@@ -1139,6 +1162,18 @@ specification.
 
 Shows all available option names for a given option
 
+=item --gui
+
+If the default GUI is not showing up because no_gui has been
+specified, a sure can still call the application with only the --gui
+flag to make it appear.
+
+=item --no-gui
+
+If the no_gui option hasn't been set and the user doesn't want to see
+the GUI then they can use the --no-gui flag as the only argument to
+ensure it doesn't appear.
+
 =back
 
 =item capture_output
@@ -1146,6 +1181,12 @@ Shows all available option names for a given option
 This tells the Getopt::GUI::Long module that it should caputure the
 resulting STDOUT and STDERR results from the script and display the
 results in a window once the script has finished.
+
+=item no_gui
+
+This option defaults to not presenting a GUI form for the user to fill
+out B<unless> they specify --gui as the first and only argument on the
+command line.
 
 =back
 
@@ -1200,6 +1241,30 @@ LocalOptionsMap functions should be copied to your perl script.
       return @opts;
   }
 
+=head1 Usage as a CGI Script
+
+If a Getopt::GUI::Long script is installed as a CGI script, then the
+Getopt::GUI::Long system will automatically create a web front end for
+the perl script.  It will present the user with all the normal
+arguments that it would normally to a Gtk2 or other windowing system.
+
+It will not present the box for generic additional arguments since
+this is not safe to do.  If you trust your users (ie, you have an
+authentication system in place) then you can set the I<allowcgiargs>
+GUI variable to make this box appear.  Example invocation (not
+generally recommended):
+
+  ['GUI:allowcgiargs',1]
+
+It also allows you to not present certain options to web users that
+you will to command line users (some options may not be safe for CGI
+use).  You can do this by setting the I<nocgi> variable in option
+definitions you wish to disallow via CGI.  E.G., if you had an option
+to specify a location where to load configuration a file from, this
+would likely be unsafe to publish in a CGI script.   So remove it:
+
+  ["c|config-file","Load a specific configuration file", nocgi => 1]
+
 =head1 EXAMPLES
 
 See the getopttest program in the examples directory for an exmaple
@@ -1211,7 +1276,7 @@ Wes Hardaker, hardaker@users.sourceforge.net
 
 =head1 COPYRIGHT and LICENSE
 
-Copyright (c) 2006-2007, SPARTA, Inc.  All rights reserved
+Copyright (c) 2006-2009, SPARTA, Inc.  All rights reserved
 
 Copyright (c) 2006-2007, Wes Hardaker. All rights reserved
 
@@ -1223,6 +1288,15 @@ it under the same terms as Perl itself.
 perl(1)
 
 modules: QWizard
+
+=head1 HISTORY
+
+This module was originally named Getopt::Long::GUI but the
+Getopt::Long author wanted to reserve the Getopt::Long namespace
+entirely for himself and thus it's been recently renamed to
+Getopt::GUI::Long instead.  The class tree isn't as clean this way, as
+this module still inherits from Getopt::Long but it everything still
+works of course.
 
 =cut
 
