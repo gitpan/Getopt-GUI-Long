@@ -8,7 +8,7 @@ use Text::Wrap;
 use Getopt::Long qw();
 use File::Temp qw(tempfile);
 
-our $VERSION="0.9";
+our $VERSION="0.91";
 
 require Exporter;
 
@@ -25,6 +25,7 @@ my %config = (
 	      capture_output => 0,
 	      display_help => 0,
 	      no_gui => 0,
+	      allow_zero => 0,
 	     );
 
 my @pass_to_qwizard_qs = qw(helpdesc helptext values labels default
@@ -93,7 +94,7 @@ sub GetOptions(@) {
     # If the user didn't specify any arguments, we display a GUI for them.
     if ($firstarg ne '--nogui' &&
 	$firstarg ne '--no-gui' &&
-	(($#main::ARGV == -1 && !$config{'no_gui'}) ||
+	(($#main::ARGV == -1 && !$config{'no_gui'} && !$config{'allow_zero'}) ||
 	 $firstarg eq '--gui') &&
 	eval "require QWizard") {
 
@@ -466,7 +467,7 @@ sub GetOptions(@) {
 		$h->();
 	    }
 	}
-    } elsif ($#main::ARGV == -1) {
+    } elsif ($#main::ARGV == -1 && !$config{'allow_zero'}) {
 	# no qwizard, but no args so force usage
 	$dohelp = 1;
 	$opts[0]{'h'} = 1;
@@ -1187,6 +1188,14 @@ results in a window once the script has finished.
 This option defaults to not presenting a GUI form for the user to fill
 out B<unless> they specify --gui as the first and only argument on the
 command line.
+
+=item allow_zero
+
+By default the GUI will always pop up if zero-arguments have been
+specified (or the help info will be displayed if no_gui is set).  This
+options specifies that zero arguments is a normal usage case.  Thus
+the only way to force the GUI or help to appear will be the command
+line --gui flag.
 
 =back
 
