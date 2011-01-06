@@ -8,7 +8,7 @@ use Text::Wrap;
 use Getopt::Long qw();
 use File::Temp qw(tempfile);
 
-our $VERSION="0.91";
+our $VERSION="0.92";
 
 require Exporter;
 
@@ -37,7 +37,7 @@ my %primaries =
   (
    display_results =>
    {
-    title => "$ARGV Output",
+    title => (defined($ARGV) ? $ARGV : "") . " Output",
     questions =>
     [
      { type => 'paragraph',
@@ -85,8 +85,9 @@ sub GetOptions(@) {
 
     my $firstarg = "";
 
-    if ($main::ARGV[0] =~ /--*gui/ || $main::ARGV[0] =~ /--*no-gui/ ||
-	$main::ARGV[0] =~ /--*nogui/) {
+    if ($#main::ARGV > -1 &&
+	($main::ARGV[0] =~ /--*gui/ || $main::ARGV[0] =~ /--*no-gui/ ||
+	 $main::ARGV[0] =~ /--*nogui/)) {
 	$firstarg = shift @main::ARGV;
 	$firstarg = '-' . $firstarg if ($firstarg =~ /^-[^-]/);
     }
@@ -809,7 +810,7 @@ Getopt::GUI::Long
 
   # or a GUI screen:
 
-  (see http://net-policy.sourceforge.net/images/getopt_example.png )
+  (see http://www.dnssec-tools.org/images/getopt_example.png )
 
 =head1 DESCRIPTION
 
