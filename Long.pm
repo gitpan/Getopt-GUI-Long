@@ -8,7 +8,7 @@ use Text::Wrap;
 use Getopt::Long qw();
 use File::Temp qw(tempfile);
 
-our $VERSION="0.92";
+our $VERSION="0.93";
 
 require Exporter;
 
@@ -1250,6 +1250,23 @@ LocalOptionsMap functions should be copied to your perl script.
       }
       return @opts;
   }
+
+=head2 Forcing a Particular Generator
+
+There a times where you may want to force a particular generator to be
+used.  This can be accomplished by setting the QWIZARD_GENERATOR
+environmental variable.  this can actually be done in code within
+something like LocalGetOptions function as well:
+
+ sub LocalGetOptions {
+     # force the library by using $ENV{'QWIZARD_GENERATOR'}
+     # if Gtk2, Tk, HTML or Readline generators are required, set the
+     # QWIZARD_GENERATOR ENV variable either externally or in this
+     # script Example: Force QWizard to use Tk instead of the
+     # preferred default of Gtk2 like this:
+     $ENV{'QWIZARD_GENERATOR'} = 'Tk' if (not exists($ENV{'QWIZARD_GENERATOR'}));
+ 
+     # ... conitune with the rest of the LocalGetOptions shown above
 
 =head1 Usage as a CGI Script
 
